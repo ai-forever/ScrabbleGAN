@@ -264,7 +264,7 @@ class Trainer:
             img = self.model.fake_img.cpu().data.numpy()[0]
             normalized_img = ((img + 1) * 255 / 2).astype(np.uint8)
             normalized_img = np.moveaxis(normalized_img, 0, -1)
-            cv2.imwrite(f'./output/epoch_{epoch}_fake_img.png', cv2.cvtColor(normalized_img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(f'./output/epoch_{epoch}_fake_img.png', normalized_img)
 
             # Print Recognizer prediction for 4 (or batch size) real images from last batch
             num_imgs = 4 if self.config.batch_size >= 4 else self.config.batch_size

@@ -78,7 +78,7 @@ def main(args):
 
             img_name = f'{data_iter}-{idx}.png'
             img_path = os.path.join(args.output_path, img_name)
-            cv2.imwrite(img_path, cv2.cvtColor(normalized_img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(img_path, normalized_img)
 
             img_path_truncated = os.path.join(
                 os.path.basename(args.output_path), img_name)
