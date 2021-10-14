@@ -1,12 +1,13 @@
 import torch
+import argparse
+from itertools import cycle
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from importlib import import_module
 import shutil
-import glob
+import cv2
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import logging
 
 import torch.nn.functional as F
@@ -24,29 +25,43 @@ np.random.seed(seed)
 
 level = logging.INFO
 format_log = '%(message)s'
-handlers = [logging.FileHandler('./output/output.log'), logging.StreamHandler()]
+
+os.makedirs('output', exist_ok=True)
+handlers = [logging.FileHandler('output/output.log'), logging.StreamHandler()]
 logging.basicConfig(level=level, format=format_log, handlers=handlers)
 
 
+def get_train_loader(config, data_pkl_path):
+    data_loader = DataLoader(config, data_pkl_path)
+    data_loader = data_loader.create_train_loader()
+    return data_loader
+
+
 class Trainer:
-    def __init__(self, config):
+    def __init__(self, config, args):
         self.config = config
         self.terminal_width = shutil.get_terminal_size((80, 20)).columns
-
         logging.info(f' Loading Data '.center(self.terminal_width, '*'))
-        data_loader = DataLoader(self.config)
 
-        self.train_loader = data_loader.create_train_loader()
+        self.is_unlabeled_data = False
+        if args.unlabeled_pkl_path:
+            self.is_unlabeled_data = True
+            logging.info("Using unlabeled data to train discriminator")
+
+        self.labeled_loader = get_train_loader(config, args.data_pkl_path)
+        self.num_chars = len(self.labeled_loader.dataset.char_map)
+        if self.is_unlabeled_data:
+            self.unlabeled_loader = get_train_loader(config, args.unlabeled_pkl_path)
 
         # Model
         logging.info(f' Model: {self.config.architecture} '.center(self.terminal_width, '*'))
         model_type = import_module('models.' + self.config.architecture)
         create_model = getattr(model_type, 'create_model')
-        self.model = create_model(self.config, data_loader.dataset.char_map)
+        self.model = create_model(self.config, self.labeled_loader.dataset.char_map, args.lexicon_path)
         logging.info(f'{self.model}\n')
         self.model.to(self.config.device)
 
-        self.word_map = WordMap(data_loader.dataset.char_map)
+        self.word_map = WordMap(self.labeled_loader.dataset.char_map)
 
         # Loss, Optimizer and LRScheduler
         self.G_criterion = getattr(loss_functions, self.config.g_loss_fn)('G')
@@ -68,19 +83,12 @@ class Trainer:
         self.start_epoch = 1
         # Load checkpoint if training is to be resumed
         self.model_checkpoint = ModelCheckpoint(config=self.config)
-        if config.resume_training:
+        if args.pretrain_path:
             self.model, self.optimizers, self.schedulers, self.start_epoch = \
-                self.model_checkpoint.load(self.model, self.config.start_epoch, self.optimizers, self.schedulers)
+                self.model_checkpoint.load(
+                    self.model, args.pretrain_path, self.optimizers, self.schedulers, load_only_R=args.load_only_R)
             self.G_optimizer, self.D_optimizer, self.R_optimizer = self.optimizers
             logging.info(f'Resuming model training from epoch {self.start_epoch}')
-        else:
-            # remove previous logs, if any
-            logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
-            for f in logs:
-                try:
-                    os.remove(f)
-                except IsADirectoryError:
-                    shutil.rmtree(f)
 
         # logging
         self.writer = SummaryWriter(f'logs')
@@ -148,6 +156,23 @@ class Trainer:
         self.G_optimizer.step()
         self.G_optimizer.zero_grad()
 
+    def optimize_D_unlabeled(self):
+        """Completes forward, backward, and optimize for D on unlabeled data"""
+        # generate fake image using generator
+        self.model.forward_fake()
+        # Switch on backpropagation for R and D
+        self.set_requires_grad([self.model.D], True)
+        pred_D_fake = self.model.D(self.model.fake_img.detach())
+        pred_D_real = self.model.D(self.real_unlabeled_img.detach())
+        # we will now calculate discriminator loss for both real and fake images
+        self.loss_D_fake = self.D_criterion(pred_D_fake, 'fake')
+        self.loss_D_real = self.D_criterion(pred_D_real, 'real')
+        self.loss_D = self.loss_D_fake + self.loss_D_real
+
+        self.loss_D.backward()
+        self.D_optimizer.step()
+        self.D_optimizer.zero_grad()
+
     def optimize_D_R(self):
         """Completes forward, backward, and optimize for D and R"""
         # generate fake image using generator
@@ -185,14 +210,26 @@ class Trainer:
         for epoch in range(self.start_epoch, self.config.num_epochs + 1):
             logging.info(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
-            progbar = tqdm(self.train_loader)
+
+            train_loader = self.labeled_loader
+            len_loader = len(self.labeled_loader)
+            if self.is_unlabeled_data:
+                if len(self.unlabeled_loader) > len(self.labeled_loader):
+                    train_loader = zip(cycle(self.labeled_loader), self.unlabeled_loader)
+                else:
+                    train_loader = zip(self.labeled_loader, cycle(self.unlabeled_loader))
+
+            progbar = tqdm(train_loader, total=len_loader)
             losses_G, losses_D, losses_D_real, losses_D_fake = [], [], [], []
             losses_R_real, losses_R_fake, grads_fake_R, grads_fake_adv = [], [], [], []
-
             for i, batch_items in enumerate(progbar):
+                if self.is_unlabeled_data:
+                    batch_items, data_unlabeled = batch_items
+                    self.real_unlabeled_img = data_unlabeled['img'].to(self.config.device)
+
                 self.real_img = batch_items['img'].to(self.config.device)
                 self.real_y = batch_items['label'].to(self.config.device)
-                self.real_y_one_hot = F.one_hot(batch_items['label'], self.config.num_chars).to(self.config.device)
+                self.real_y_one_hot = F.one_hot(batch_items['label'], self.num_chars).to(self.config.device)
                 self.real_y_lens = batch_items['label_len'].to(self.config.device)
 
                 # Forward + Backward + Optimize G
@@ -202,6 +239,9 @@ class Trainer:
 
                 # Forward + Backward + Optimize D and R
                 self.optimize_D_R()
+
+                if self.is_unlabeled_data:
+                    self.optimize_D_unlabeled()
 
                 # save losses
                 losses_G.append(self.loss_G.cpu().data.numpy())
@@ -221,9 +261,10 @@ class Trainer:
                          f'R_real = {np.mean(losses_R_real):.3f}, R_fake = {np.mean(losses_R_fake):.3f}'
             )
             # Save one generated fake image from last batch
-            plt.imshow(self.model.fake_img.cpu().data.numpy()[0][0], cmap='gray')
-            plt.title(self.word_map.decode(self.model.fake_y.cpu().data.numpy()[0].reshape(1, -1)))
-            plt.savefig(f'./output/epoch_{epoch}_fake_img.png')
+            img = self.model.fake_img.cpu().data.numpy()[0]
+            normalized_img = ((img + 1) * 255 / 2).astype(np.uint8)
+            normalized_img = np.moveaxis(normalized_img, 0, -1)
+            cv2.imwrite(f'./output/epoch_{epoch}_fake_img.png', cv2.cvtColor(normalized_img, cv2.COLOR_RGB2BGR))
 
             # Print Recognizer prediction for 4 (or batch size) real images from last batch
             num_imgs = 4 if self.config.batch_size >= 4 else self.config.batch_size
@@ -247,12 +288,10 @@ class Trainer:
             for sch in self.schedulers:
                 sch.step()
 
-            # save latest checkpoint and after every 5 epochs
-            self.model_checkpoint.save(self.model, epoch, self.G_optimizer, self.D_optimizer, self.R_optimizer,
-                                       *self.schedulers)
-            if epoch > 1:
-                if (epoch % 5) != 1:
-                    os.remove(os.path.join(self.model_checkpoint.weight_dir, f'model_checkpoint_epoch_{epoch-1}.pth.tar'))
+            # save checkpoint after every 5 epochs
+            if epoch % 5 == 0:
+                self.model_checkpoint.save(self.model, epoch, self.G_optimizer, self.D_optimizer, self.R_optimizer,
+                                           *self.schedulers)
 
             # write logs
             self.writer.add_scalar(f'loss_G', np.mean(losses_G), epoch * i)
@@ -267,7 +306,19 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    config = Config
-    terminal_width = shutil.get_terminal_size((80, 20)).columns
-    trainer = Trainer(config)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_pkl_path", required=True, type=str,
+                        help="Path to the pickle processed data")
+    parser.add_argument("--unlabeled_pkl_path", type=str, default='',
+                        help="Path to the pickle processed unlabeled data")
+    parser.add_argument("--pretrain_path", type=str, default='',
+                        help="Path to the pretrain model weights")
+    parser.add_argument("--load_only_R", action='store_true',
+                        help="To load only Recognizer from model weights")
+    parser.add_argument("--lexicon_path", action='append', required=True,
+                        type=str, help="Path to the lexicon txt. Can be passed "
+                        "multiple times")
+    args = parser.parse_args()
+
+    trainer = Trainer(Config, args)
     trainer.train()

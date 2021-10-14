@@ -3,6 +3,7 @@ import sys
 sys.path.extend(['..'])
 
 import torch
+import torch.nn.functional as F
 import torch.utils.data
 import torch.utils.data as data_utils
 import torchvision.transforms as transforms
@@ -13,17 +14,11 @@ from utils.data_utils import *
 
 # Dataset (Input Pipeline)
 class CustomDataset(data_utils.Dataset):
-    """
-    Custom dataset
-    Arguments:
-    Returns:
-    """
-
-    def __init__(self, config, is_training=True):
+    def __init__(self, config, pickle_path, is_training=True):
         self.config = config
         self.is_training = is_training
 
-        with open(config.data_file, 'rb') as f:
+        with open(pickle_path, 'rb') as f:
             data = pkl.load(f)
 
         self.word_data = data['word_data']
@@ -54,24 +49,26 @@ class CustomDataset(data_utils.Dataset):
 
 
 class DataLoader:
-    def __init__(self, config):
+    def __init__(self, config, pickle_path):
         self.config = config
+        self.pickle_path = pickle_path
 
     def create_train_loader(self):
-        self.dataset = CustomDataset(config=self.config)
+        self.dataset = CustomDataset(self.config, self.pickle_path)
         return torch.utils.data.DataLoader(
             self.dataset, batch_size=self.config.batch_size, shuffle=True,
-            num_workers=2, pin_memory=True, collate_fn=self.batch_collate)
+            num_workers=6, pin_memory=True, collate_fn=self.batch_collate)
 
     def batch_collate(self, batch):
         items = {}
         max_w = max([item['img'].shape[2] for item in batch])
 
         # Remove channel dimension, swap height and width, pad widths and return to the original shape
-        items['img'] = pad_sequence([item['img'].squeeze().permute(1, 0) for item in batch],
-                                    batch_first=True,
-                                    padding_value=1.)
-        items['img'] = items['img'].permute(0, 2, 1).unsqueeze(1)
+        imgs = [
+            F.pad(item['img'], [0, max_w - item['img'].size(2), 0, self.config.img_h - item['img'].size(1)])
+            for item in batch
+        ]
+        items['img'] = torch.stack(imgs)
 
         items['label_len'] = torch.tensor([len(item['label']) for item in batch])
         items['label'] = pad_sequence([item['label'] for item in batch], batch_first=True, padding_value=0)

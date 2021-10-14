@@ -8,6 +8,7 @@ from config import Config
 class ModelCheckpoint:
     def __init__(self, weight_dir='./weights', config=Config):
         self.weight_dir = weight_dir
+        os.makedirs(self.weight_dir, exist_ok=True)
         self.config = config
 
     def save(self, model, epoch, G_opt, D_opt, R_opt, G_sch=None, D_sch=None, R_sch=None):
@@ -24,17 +25,23 @@ class ModelCheckpoint:
         }
         torch.save(save_dict, filename)
 
-    def load(self, model, epoch, optimizers=None, schedulers=None, checkpoint_path=None):
+    def load(
+        self, model, checkpoint_path, optimizers=None, schedulers=None,
+        load_only_R=False
+    ):
         [G_opt, D_opt, R_opt] = optimizers if optimizers is not None else [None]*3
         [G_sch, D_sch, R_sch] = schedulers if schedulers is not None else [None]*3
 
-        if checkpoint_path is None:
-            load_filename = os.path.join(self.weight_dir, f'model_checkpoint_epoch_{epoch}.pth.tar')
-        else:
-            load_filename = checkpoint_path
-        if os.path.isfile(load_filename):
-            checkpoint = torch.load(load_filename, map_location=self.config.device)
-            model.load_state_dict(checkpoint['model'])
+        if os.path.isfile(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=self.config.device)
+            model_checkpoint = checkpoint['model']
+            if load_only_R:
+                model_dict = model.state_dict()
+                model_checkpoint = {k: v for k, v in model_checkpoint.items()
+                                    if k.startswith('R.')}
+                model_dict.update(model_checkpoint)
+                model_checkpoint = model_dict
+            model.load_state_dict(model_checkpoint)
 
             if optimizers is not None:
                 G_opt.load_state_dict(checkpoint['G_opt'])
@@ -47,7 +54,7 @@ class ModelCheckpoint:
 
             start_epoch = checkpoint['epoch'] + 1
         else:
-            raise FileNotFoundError(f'No checkpoint found at {load_filename}')
+            raise FileNotFoundError(f'No checkpoint found at {checkpoint_path}')
 
         return model, [G_opt, D_opt, R_opt], [G_sch, D_sch, R_sch], start_epoch
 

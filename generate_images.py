@@ -1,5 +1,10 @@
 from importlib import import_module
 import pickle as pkl
+import cv2
+import numpy as np
+import pandas as pd
+import os
+from tqdm import tqdm
 
 from utils.data_utils import *
 from utils.training_utils import ModelCheckpoint
@@ -9,35 +14,23 @@ import matplotlib.pyplot as plt
 
 
 class ImgGenerator:
-    def __init__(self, checkpt_path, config, char_map=None):
+    def __init__(self, checkpt_path, config, char_map, lexicon_paths):
         """
         :param checkpt_path: Path of the model checkpoint file to be used
         :param config: Config with all the parameters to be used
         """
 
         self.config = config
-
-        if char_map is None:
-            with open(config.data_file, 'rb') as f:
-                data = pkl.load(f)
-            self.char_map = data['char_map']
-        else:
-            self.char_map = char_map
-
-        # Model
+        self.char_map = char_map
         print(f'Model: {config.architecture}')
         model_type = import_module('models.' + self.config.architecture)
         create_model = getattr(model_type, 'create_model')
-        self.model = create_model(self.config, self.char_map)
-        # print(self.model, end='\n\n')
+        self.model = create_model(self.config, self.char_map, lexicon_paths)
         self.model.to(self.config.device)
         self.model.eval()
-
-        self.word_map = WordMap(self.char_map)
-
         # Load model weights
         self.model_checkpoint = ModelCheckpoint(config=self.config)
-        self.model, _, _, _ = self.model_checkpoint.load(self.model, epoch=None, checkpoint_path=checkpt_path)
+        self.model, _, _, _ = self.model_checkpoint.load(self.model, checkpt_path)
 
     def generate(self, random_num_imgs=5, word_list=None, z=None):
         """
@@ -49,44 +42,74 @@ class ImgGenerator:
         """
 
         if word_list is None:
-            # Generate random images
-            with torch.no_grad():
-                self.model.forward_fake(z=None, b_size=random_num_imgs)
+            b_size = random_num_imgs
         else:
-            encoded_words, _ = self.word_map.encode(word_list)
-            with torch.no_grad():
-                self.model.forward_fake(z=None, fake_y=encoded_words, b_size=len(word_list))
+            b_size = len(word_list)
 
-        word_labels_decoded = self.word_map.decode(self.model.fake_y.cpu().numpy())
+        with torch.no_grad():
+            self.model.forward_fake(z=None, fake_y=word_list, b_size=b_size)
 
-        return self.model.fake_img.squeeze(1).cpu().numpy(), self.model.fake_y.cpu().numpy(), word_labels_decoded
+        return self.model.fake_img.squeeze(1).cpu().numpy(), self.model.fake_y_decoded
+
+
+def main(args):
+    with open(args.char_map_path, 'rb') as f:
+        char_map = pkl.load(f)
+    char_map = char_map['char_map']
+
+    generator = ImgGenerator(
+        checkpt_path=args.checkpoint_path,
+        config=Config,
+        char_map=char_map,
+        lexicon_paths=args.lexicon_path
+    )
+
+    os.makedirs(args.output_path, exist_ok=True)
+
+    img_paths = []
+    labels = []
+    data_iters = range(max(1, int(args.num_imgs/args.batch_size)))
+    tqdm_data_iters = tqdm(data_iters, leave=False)
+    for data_iter in tqdm_data_iters:
+        generated_imgs, word_labels = generator.generate(args.batch_size)
+        for idx, (label, img) in enumerate(zip(word_labels, generated_imgs)):
+            normalized_img = ((img + 1) * 255 / 2).astype(np.uint8)
+            normalized_img = np.moveaxis(normalized_img, 0, -1)
+
+            img_name = f'{data_iter}-{idx}.png'
+            img_path = os.path.join(args.output_path, img_name)
+            cv2.imwrite(img_path, cv2.cvtColor(normalized_img, cv2.COLOR_RGB2BGR))
+
+            img_path_truncated = os.path.join(
+                os.path.basename(args.output_path), img_name)
+            img_paths.append(img_path_truncated)
+            labels.append(label)
+
+    # save csv
+    list_dict = {'filename': img_paths, 'text': labels}
+    df = pd.DataFrame(list_dict)
+    csv_path = os.path.join(
+        os.path.dirname(args.output_path),
+        f'{os.path.basename(args.output_path)}.csv'
+    )
+    df.to_csv(csv_path, index=False) 
 
 
 if __name__ == "__main__":
-    # Construct the argument parse and parse the arguments
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-c", "--checkpt_path", required=True, type=str,
-                    help="Path of the model checkpoint file to be used")
-    ap.add_argument("-m", "--char_map_path", required=True, type=str,
-                    help="Path of the file with character mapping to be used")
-    ap.add_argument("-n", "--num_imgs", required=False, type=int,
-                    help="number of sample points")
-    ap.add_argument("-w", "--word_list", required=False, nargs='+', default=[],
-                    help="words for which images need to be generated")
-    args = vars(ap.parse_args())
-    checkpoint_path = args['checkpt_path']
-    char_map_path = args['char_map_path']
-    num_imgs = args['num_imgs'] if args['num_imgs'] is not None else 5
-    word_list = args['word_list'] if len(args['word_list']) > 0 else None
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint_path", required=True, type=str,
+                        help="Path of the model checkpoint file to be used")
+    parser.add_argument("--char_map_path", required=True, type=str,
+                        help="Path of the file with character mapping to be used")
+    parser.add_argument("--num_imgs", required=True, type=int,
+                        help="number of sample points")
+    parser.add_argument("--lexicon_path", action='append', required=True,
+                        type=str, help="Path to the lexicon txt. Can be passed"
+                        " multiple times")
+    parser.add_argument("--output_path", required=True, type=str,
+                        help="Directory to save generated images")
+    parser.add_argument("--batch_size", required=False, type=int,
+                        default=1, help="Batch size")
+    args = parser.parse_args()
 
-    with open(f'{char_map_path}', 'rb') as f:
-        char_map = pkl.load(f)
-
-    config = Config
-    generator = ImgGenerator(checkpt_path=checkpoint_path, config=config, char_map=char_map)
-    generated_imgs, _, word_labels = generator.generate(num_imgs, word_list)
-
-    for label, img in zip(word_labels, generated_imgs):
-        plt.imshow(img, cmap='gray')
-        plt.title(label)
-        plt.show()
+    main(args)

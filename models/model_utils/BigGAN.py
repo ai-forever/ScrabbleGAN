@@ -21,39 +21,26 @@ from .sync_batchnorm import SynchronizedBatchNorm2d as SyncBatchNorm2d
 # block at both resolution 32x32 and 64x64. Just '64' will apply at 64x64.
 def G_arch(ch=64, attention='64', ksize='333333', dilation='111111'):
   arch = {}
-  arch[512] = {'in_channels' :  [ch * item for item in [16, 16, 8, 8, 4, 2, 1]],
-               'out_channels' : [ch * item for item in [16,  8, 8, 4, 2, 1, 1]],
-               'upsample' : [True] * 7,
-               'resolution' : [8, 16, 32, 64, 128, 256, 512],
-               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
-                              for i in range(3,10)}}
-  arch[256] = {'in_channels' :  [ch * item for item in [16, 16, 8, 8, 4, 2]],
-               'out_channels' : [ch * item for item in [16,  8, 8, 4, 2, 1]],
-               'upsample' : [True] * 6,
-               'resolution' : [8, 16, 32, 64, 128, 256],
-               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
-                              for i in range(3,9)}}
-  arch[128] = {'in_channels' :  [ch * item for item in [16, 16, 8, 4, 2]],
-               'out_channels' : [ch * item for item in [16, 8, 4, 2, 1]],
-               'upsample' : [True] * 5,
-               'resolution' : [8, 16, 32, 64, 128],
-               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
-                              for i in range(3,8)}}
-  arch[64]  = {'in_channels' :  [ch * item for item in [16, 16, 8, 4]],
-               'out_channels' : [ch * item for item in [16, 8, 4, 2]],
-               'upsample' : [True] * 4,
-               'resolution' : [8, 16, 32, 64],
-               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
-                              for i in range(3,7)}}
-  arch[32]  = {'in_channels' :  [ch * item for item in [4, 4, 4]],
-               'out_channels' : [ch * item for item in [4, 4, 4]],
-               'upsample' : [True] * 3,
-               'resolution' : [8, 16, 32],
-               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
-                              for i in range(3,6)}}
 
-  # changed here
-  arch[16] = {'in_channels': [ch * item for item in [8, 4, 2]],
+  arch[128] = {'in_channels': [ch * item for item in [8, 8, 4, 2, 2]],
+              'out_channels': [ch * item for item in [8, 4, 2, 2, 1]],
+              'upsample': [(2,2), (2,2), (2,2), (2,2), (2,1)],
+              'resolution': [8, 16, 16, 16, 16],
+              'attention': {2 ** i: (2 ** i in [int(item) for item in attention.split('_')])
+                            for i in range(3, 8)},
+              'kernel1':[3, 3, 3, 3, 3],
+              'kernel2': [3, 3, 3, 3, 1]}
+
+  arch[64] = {'in_channels': [ch * item for item in [8, 4, 2, 2]],
+              'out_channels': [ch * item for item in [4, 2, 2, 1]],
+              'upsample': [(2,2), (2,2), (2,2), (2,1)],
+              'resolution': [8, 16, 16, 16],
+              'attention': {2 ** i: (2 ** i in [int(item) for item in attention.split('_')])
+                            for i in range(3, 7)},
+              'kernel1':[3, 3, 3, 3],
+              'kernel2': [3, 3, 3, 1]}
+
+  arch[32] = {'in_channels': [ch * item for item in [8, 4, 2]],
                'out_channels': [ch * item for item in [4, 2, 1]],
                'upsample': [(2,2), (2,2), (2,1)],
                'resolution': [8, 16, 16],
@@ -74,7 +61,7 @@ class Generator(nn.Module):
                G_lr=5e-5, G_B1=0.0, G_B2=0.999, adam_eps=1e-8,
                BN_eps=1e-5, SN_eps=1e-12, G_mixed_precision=False, G_fp16=False,
                G_init='ortho', skip_init=False, no_optim=False,
-               G_param='SN', norm_style='bn', bn_linear='embed',
+               G_param='SN', norm_style='bn', bn_linear='embed', channels=1,
                **kwargs):
     super(Generator, self).__init__()
     # Channel width mulitplier
@@ -225,7 +212,7 @@ class Generator(nn.Module):
                                                 cross_replica=self.cross_replica,
                                                 mybn=self.mybn),
                                     self.activation,
-                                    self.which_conv(self.arch['out_channels'][-1], 1))
+                                    self.which_conv(self.arch['out_channels'][-1], channels))
 
     # Initialize weights. Optionally skip init for testing.
     if not skip_init:
@@ -312,35 +299,24 @@ class Generator(nn.Module):
 
 
 # Discriminator architecture, same paradigm as G's above
-def D_arch(ch=64, attention='64',ksize='333333', dilation='111111'):
+def D_arch(ch=64, attention='64', channels=1, ksize='333333', dilation='111111'):
   arch = {}
-  arch[256] = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8, 8, 16]],
-               'out_channels' : [item * ch for item in [1, 2, 4, 8, 8, 16, 16]],
-               'downsample' : [True] * 6 + [False],
-               'resolution' : [128, 64, 32, 16, 8, 4, 4 ],
-               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
-                              for i in range(2,8)}}
-  arch[128] = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8, 16]],
-               'out_channels' : [item * ch for item in [1, 2, 4, 8, 16, 16]],
-               'downsample' : [True] * 5 + [False],
-               'resolution' : [64, 32, 16, 8, 4, 4],
-               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
-                              for i in range(2,8)}}
-  arch[64]  = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8]],
-               'out_channels' : [item * ch for item in [1, 2, 4, 8, 16]],
-               'downsample' : [True] * 4 + [False],
-               'resolution' : [32, 16, 8, 4, 4],
-               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
-                              for i in range(2,7)}}
-  arch[32]  = {'in_channels' :  [3] + [item * ch for item in [4, 4, 4]],
-               'out_channels' : [item * ch for item in [4, 4, 4, 4]],
-               'downsample' : [True, True, False, False],
-               'resolution' : [16, 16, 16, 16],
-               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
-                              for i in range(2,6)}}
 
-  # changed here
-  arch[16] = {'in_channels': [1] + [ch * item for item in [1, 8, 16]],
+  arch[128] = {'in_channels': [channels] + [ch * item for item in [1, 8, 16]],
+              'out_channels': [item * ch for item in [1, 8, 16, 16]],
+              'downsample': [True] * 3 + [False],
+              'resolution': [16, 8, 4, 4],
+              'attention': {2 ** i: 2 ** i in [int(item) for item in attention.split('_')]
+                            for i in range(2, 5)}}
+
+  arch[64] = {'in_channels': [channels] + [ch * item for item in [1, 8, 16]],
+              'out_channels': [item * ch for item in [1, 8, 16, 16]],
+              'downsample': [True] * 3 + [False],
+              'resolution': [16, 8, 4, 4],
+              'attention': {2 ** i: 2 ** i in [int(item) for item in attention.split('_')]
+                            for i in range(2, 5)}}
+
+  arch[32] = {'in_channels': [channels] + [ch * item for item in [1, 8, 16]],
               'out_channels': [item * ch for item in [1, 8, 16, 16]],
               'downsample': [True] * 3 + [False],
               'resolution': [16, 8, 4, 4],
@@ -354,7 +330,7 @@ class Discriminator(nn.Module):
   def __init__(self, D_ch=64, D_wide=True, resolution=128,
                D_kernel_size=3, D_attn='64', n_classes=1000,
                num_D_SVs=1, num_D_SV_itrs=1, D_activation=nn.ReLU(inplace=False),
-               D_lr=2e-4, D_B1=0.0, D_B2=0.999, adam_eps=1e-8,
+               D_lr=2e-4, D_B1=0.0, D_B2=0.999, adam_eps=1e-8, channels=1,
                SN_eps=1e-12, output_dim=1, D_mixed_precision=False, D_fp16=False,
                D_init='ortho', skip_init=False, D_param='SN', bn_linear='embed', **kwargs):
     super(Discriminator, self).__init__()
@@ -381,7 +357,7 @@ class Discriminator(nn.Module):
     # Fp16?
     self.fp16 = D_fp16
     # Architecture
-    self.arch = D_arch(self.ch, self.attention)[resolution]
+    self.arch = D_arch(self.ch, self.attention, channels=channels)[resolution]
 
     # Which convs, batchnorms, and linear layers to use
     # No option to turn off SN in D right now
