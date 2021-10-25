@@ -4,24 +4,26 @@ import cv2
 import numpy as np
 import pandas as pd
 import os
+import torch
 from tqdm import tqdm
 
 from utils.data_utils import *
 from utils.training_utils import ModelCheckpoint
 from config import Config
 import argparse
-import matplotlib.pyplot as plt
 
 
 class ImgGenerator:
-    def __init__(self, checkpt_path, config, char_map, lexicon_paths):
+    def __init__(self, checkpt_path, config, char_map_path, lexicon_paths=None):
         """
         :param checkpt_path: Path of the model checkpoint file to be used
         :param config: Config with all the parameters to be used
         """
 
         self.config = config
-        self.char_map = char_map
+        with open(char_map_path, 'rb') as f:
+            char_map = pkl.load(f)
+        self.char_map = char_map['char_map']
         print(f'Model: {config.architecture}')
         model_type = import_module('models.' + self.config.architecture)
         create_model = getattr(model_type, 'create_model')
@@ -31,6 +33,15 @@ class ImgGenerator:
         # Load model weights
         self.model_checkpoint = ModelCheckpoint(config=self.config)
         self.model, _, _, _ = self.model_checkpoint.load(self.model, checkpt_path)
+
+    def _renormalize_images(self, generated_imgs):
+        """Renormalize generator outputs and return list of images."""
+        images = []
+        for img in generated_imgs:
+            normalized_img = ((img + 1) * 255 / 2).astype(np.uint8)
+            normalized_img = np.moveaxis(normalized_img, 0, -1)
+            images.append(normalized_img)
+        return images
 
     def generate(self, random_num_imgs=5, word_list=None, z=None):
         """
@@ -44,23 +55,26 @@ class ImgGenerator:
         if word_list is None:
             b_size = random_num_imgs
         else:
+            chars = set([char for char in ''.join(word_list)])
+            chars = set(chars)
+            for char in chars:
+                if char not in self.char_map:
+                    raise AssertionError(f"Can not draw {char} character!")
             b_size = len(word_list)
 
         with torch.no_grad():
             self.model.forward_fake(z=None, fake_y=word_list, b_size=b_size)
 
-        return self.model.fake_img.squeeze(1).cpu().numpy(), self.model.fake_y_decoded
+        images = self._renormalize_images(
+            self.model.fake_img.squeeze(1).cpu().numpy())
+        return images, self.model.fake_y_decoded
 
 
 def main(args):
-    with open(args.char_map_path, 'rb') as f:
-        char_map = pkl.load(f)
-    char_map = char_map['char_map']
-
     generator = ImgGenerator(
         checkpt_path=args.checkpoint_path,
         config=Config,
-        char_map=char_map,
+        char_map_path=args.char_map_path,
         lexicon_paths=args.lexicon_path
     )
 
@@ -73,12 +87,9 @@ def main(args):
     for data_iter in tqdm_data_iters:
         generated_imgs, word_labels = generator.generate(args.batch_size)
         for idx, (label, img) in enumerate(zip(word_labels, generated_imgs)):
-            normalized_img = ((img + 1) * 255 / 2).astype(np.uint8)
-            normalized_img = np.moveaxis(normalized_img, 0, -1)
-
             img_name = f'{data_iter}-{idx}.png'
             img_path = os.path.join(args.output_path, img_name)
-            cv2.imwrite(img_path, normalized_img)
+            cv2.imwrite(img_path, img)
 
             img_path_truncated = os.path.join(
                 os.path.basename(args.output_path), img_name)
@@ -92,7 +103,7 @@ def main(args):
         os.path.dirname(args.output_path),
         f'{os.path.basename(args.output_path)}.csv'
     )
-    df.to_csv(csv_path, index=False) 
+    df.to_csv(csv_path, index=False)
 
 
 if __name__ == "__main__":

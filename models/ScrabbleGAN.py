@@ -86,13 +86,14 @@ class Recognizer(nn.Module):
 
 
 class ScrabbleGAN(nn.Module):
-    def __init__(self, cfg, char_map, lexicon_paths):
+    def __init__(self, cfg, char_map, lexicon_paths=None):
         super().__init__()
 
         self.z_dist = torch.distributions.Normal(loc=0, scale=1.)
         self.z_dim = cfg.z_dim
 
-        self._load_lexicon(cfg, char_map, lexicon_paths)
+        if lexicon_paths is not None:
+            self._load_lexicon(cfg, char_map, lexicon_paths)
 
         self.batch_size = cfg.batch_size
         self.num_chars = len(char_map)
