@@ -4,8 +4,8 @@ import torch
 class Config:
     # arch[img_h] defines the architecture to be selected
     # imh_h and char_width should be in: 32x16, 64x32, 128x64
-    img_h = 32
-    char_w = 16
+    img_h = 128
+    char_w = 64
     channels = 3
 
     batch_size = 8
