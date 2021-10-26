@@ -14,12 +14,17 @@ import argparse
 
 
 class ImgGenerator:
-    def __init__(self, checkpt_path, config, char_map_path, lexicon_paths=None):
+    def __init__(self, checkpt_path, config, char_map_path, shrink_ratio=0.5,
+        lexicon_paths=None):
         """
-        :param checkpt_path: Path of the model checkpoint file to be used
-        :param config: Config with all the parameters to be used
+        :param checkpt_path: Path of the model checkpoint file to be used.
+        :param config: Config with all the parameters to be used.
+        :param char_map_path: Path to pkl-file with char_map dict.
+        :param lexicon_paths: List of paths to lexicon txt. Default is None.
+        :param shrink_ratio: The ratio of image resize by width (ScrabbleGAN by
+            default generate too wide images.
         """
-
+        self.shrink_ratio = shrink_ratio
         self.config = config
         with open(char_map_path, 'rb') as f:
             char_map = pkl.load(f)
@@ -34,6 +39,16 @@ class ImgGenerator:
         self.model_checkpoint = ModelCheckpoint(config=self.config)
         self.model, _, _, _ = self.model_checkpoint.load(self.model, checkpt_path)
 
+    def _shrink_images(self, images):
+        """Resize image by width by shrink_ratio."""
+        resized_images = []
+        for img in images:
+            h, w = img.shape[:2]
+            resized_images.append(
+                cv2.resize(img, (int(w * self.shrink_ratio), h), cv2.INTER_AREA)
+            )
+        return resized_images
+
     def _renormalize_images(self, generated_imgs):
         """Renormalize generator outputs and return list of images."""
         images = []
@@ -42,6 +57,17 @@ class ImgGenerator:
             normalized_img = np.moveaxis(normalized_img, 0, -1)
             images.append(normalized_img)
         return images
+
+    def _preprocess_words(self, word_list):
+        """Preprocess input texts: remove out of vocabulary chars."""
+        new_word_list = []
+        for word in word_list:
+            new_word = [char for char in word.lower() if char in self.char_map]
+            new_word = ''.join(new_word)
+            if len(new_word) == 0:
+                new_word = ' '
+            new_word_list.append(new_word)
+        return new_word_list
 
     def generate(self, random_num_imgs=5, word_list=None, z=None):
         """
@@ -55,11 +81,7 @@ class ImgGenerator:
         if word_list is None:
             b_size = random_num_imgs
         else:
-            chars = set([char for char in ''.join(word_list)])
-            chars = set(chars)
-            for char in chars:
-                if char not in self.char_map:
-                    raise AssertionError(f"Can not draw {char} character!")
+            word_list = self._preprocess_words(word_list)
             b_size = len(word_list)
 
         with torch.no_grad():
@@ -67,6 +89,7 @@ class ImgGenerator:
 
         images = self._renormalize_images(
             self.model.fake_img.squeeze(1).cpu().numpy())
+        images = self._shrink_images(images)
         return images, self.model.fake_y_decoded
 
 
