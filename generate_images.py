@@ -15,7 +15,7 @@ import argparse
 
 class ImgGenerator:
     def __init__(self, checkpt_path, config, char_map_path, shrink_ratio=0.5,
-        lexicon_paths=None):
+        lexicon_paths=None, return_rgb=False):
         """
         :param checkpt_path: Path of the model checkpoint file to be used.
         :param config: Config with all the parameters to be used.
@@ -23,7 +23,9 @@ class ImgGenerator:
         :param lexicon_paths: List of paths to lexicon txt. Default is None.
         :param shrink_ratio: The ratio of image resize by width (ScrabbleGAN by
             default generate too wide images.
+        :return_rgb: Return RGB image.
         """
+        self.return_rgb = return_rgb
         self.shrink_ratio = shrink_ratio
         self.config = config
         with open(char_map_path, 'rb') as f:
@@ -49,6 +51,15 @@ class ImgGenerator:
             )
         return resized_images
 
+    def _bgr2rgb(self, images):
+        """Convert images to BGR."""
+        rgb_images = []
+        for img in images:
+            rgb_images.append(
+                cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            )
+        return rgb_images
+
     def _renormalize_images(self, generated_imgs):
         """Renormalize generator outputs and return list of images."""
         images = []
@@ -62,8 +73,13 @@ class ImgGenerator:
         """Preprocess input texts: remove out of vocabulary chars."""
         new_word_list = []
         for word in word_list:
-            new_word = [char for char in word.lower() if char in self.char_map]
-            new_word = ''.join(new_word)
+            new_word = ''
+            for char in word:
+                if char in self.char_map:
+                    new_word += char
+                elif char.lower() in self.char_map:
+                    new_word += char.lower()
+
             if len(new_word) == 0:
                 new_word = ' '
             new_word_list.append(new_word)
@@ -90,6 +106,8 @@ class ImgGenerator:
         images = self._renormalize_images(
             self.model.fake_img.squeeze(1).cpu().numpy())
         images = self._shrink_images(images)
+        if self.return_rgb:
+            images = self._bgr2rgb(images)
         return images, self.model.fake_y_decoded
 
 
