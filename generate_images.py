@@ -115,6 +115,8 @@ def main(args):
     generator = ImgGenerator(
         checkpt_path=args.checkpoint_path,
         config=Config,
+        return_rgb=args.return_rgb,
+        shrink_ratio=args.shrink_ratio,
         char_map_path=args.char_map_path,
         lexicon_paths=args.lexicon_path
     )
@@ -151,6 +153,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", required=True, type=str,
                         help="Path of the model checkpoint file to be used")
+    parser.add_argument("--return_rgb", action='store_true',
+                        help="To switch channels of generated images.")
+    parser.add_argument("--shrink_ratio", type=float, default=0.5,
+                        help="The resize ratio of output images by width.")
     parser.add_argument("--char_map_path", required=True, type=str,
                         help="Path of the file with character mapping to be used")
     parser.add_argument("--num_imgs", required=True, type=int,
