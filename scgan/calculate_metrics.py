@@ -2,11 +2,12 @@ from config import Config
 import argparse
 import os
 import numpy as np
-from data_loader.data_generator import CustomDataset
-from generate_images import ImgGenerator
 from tqdm import tqdm
 from PIL import Image
 import cv2
+
+from scgan.data_loader.data_generator import CustomDataset
+from scgan.generate_images import ImgGenerator
 
 
 def img_resize(img, h=128, w=512):

@@ -6,7 +6,7 @@ import cv2
 import os
 from collections import Counter
 
-from config import Config
+from scgan.config import Config
 
 
 def get_full_img_path(img_path, path_to_csv):

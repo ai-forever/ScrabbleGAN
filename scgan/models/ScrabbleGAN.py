@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
-from models.model_utils import BigGAN as BGAN
-from utils.data_utils import *
 import pandas as pd
+
+from scgan.models.model_utils import BigGAN as BGAN
+from scgan.utils.data_utils import *
 
 
 def recognizer_block1(in_channels, out_channels, kernel_size, pad):

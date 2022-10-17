@@ -1,7 +1,4 @@
 import sys
-
-sys.path.extend(['..'])
-
 import torch
 import torch.nn.functional as F
 import torch.utils.data
@@ -9,7 +6,7 @@ import torch.utils.data as data_utils
 import torchvision.transforms as transforms
 import pickle as pkl
 
-from utils.data_utils import *
+from scgan.utils.data_utils import *
 
 
 # Dataset (Input Pipeline)

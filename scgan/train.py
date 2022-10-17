@@ -9,13 +9,13 @@ import cv2
 import os
 import numpy as np
 import logging
-
 import torch.nn.functional as F
-from data_loader.data_generator import DataLoader
-from utils.data_utils import *
-from utils.training_utils import ModelCheckpoint
-from losses_and_metrics import loss_functions, metrics
-from config import Config
+
+from scgan.data_loader.data_generator import DataLoader
+from scgan.utils.data_utils import *
+from scgan.utils.training_utils import ModelCheckpoint
+from scgan.losses_and_metrics import loss_functions, metrics
+from scgan.config import Config
 
 seed = 0
 torch.manual_seed(seed)

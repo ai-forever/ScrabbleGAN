@@ -2,7 +2,8 @@ import torch
 import shutil
 import os
 import numpy as np
-from config import Config
+
+from scgan.config import Config
 
 
 class ModelCheckpoint:

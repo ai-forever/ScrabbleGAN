@@ -6,11 +6,11 @@ import pandas as pd
 import os
 import torch
 from tqdm import tqdm
-
-from utils.data_utils import *
-from utils.training_utils import ModelCheckpoint
-from config import Config
 import argparse
+
+from scgan.utils.data_utils import *
+from scgan.utils.training_utils import ModelCheckpoint
+from scgan.config import Config
 
 
 class ImgGenerator:
@@ -32,7 +32,7 @@ class ImgGenerator:
             char_map = pkl.load(f)
         self.char_map = char_map['char_map']
         print(f'Model: {config.architecture}')
-        model_type = import_module('models.' + self.config.architecture)
+        model_type = import_module('scgan.models.' + self.config.architecture)
         create_model = getattr(model_type, 'create_model')
         self.model = create_model(self.config, self.char_map, lexicon_paths)
         self.model.to(self.config.device)
