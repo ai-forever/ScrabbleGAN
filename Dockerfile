@@ -26,7 +26,6 @@ RUN pip3 install --no-cache-dir numpy==1.19.5
 RUN pip3 install --no-cache-dir \
     torch==1.9.0+cu111 \
     torchvision==0.10.0+cu111 \
-    torchaudio==0.9.0 \
     -f https://download.pytorch.org/whl/torch_stable.html
 
 ENV PYTHONPATH $PYTHONPATH:/workdir/

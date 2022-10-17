@@ -18,6 +18,8 @@ The provided [Dockerfile](Dockerfile) is supplied to build an image with CUDA su
 - `sudo make all` to build a docker image and create a container.
   Or `sudo make all GPUS=device=0 CPUS=10` if you want to specify gpu devices and limit CPU-resources.
 
+If you don't want to use Docker, you can install dependencies via requirements.txt
+
 ### Preprocess data
 
 The dataset should contain a folder with text images and csv file with annotations. The csv file should consist of two columns: "filename" with the relative path to the images (folder-name/image-name.png), and "text"-column with the image transcription.

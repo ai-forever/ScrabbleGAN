@@ -1,6 +1,5 @@
 opencv-python==4.5.1.48
+torch>=1.6.0
+torchvision>=0.7.0
 pandas==1.2.3
 tqdm==4.57.0
-pudb==2020.1
-matplotlib==3.3.4
-notebook==6.2.0
